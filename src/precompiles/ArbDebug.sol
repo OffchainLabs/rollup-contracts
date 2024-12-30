@@ -35,6 +35,12 @@ interface ArbDebug {
 
     function legacyError() external pure;
 
+    // emulates the same behaviour
+    function emulateRevertPackingOutput() external view returns (uint8);
+
+    // reverts packaging output
+    function revertPackingOutput() external view returns (uint8);
+
     error Custom(uint64, string, bool);
     error Unused();
 }
