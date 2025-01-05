@@ -204,7 +204,7 @@ abstract contract AbsBridge is Initializable, DelegateCallAware, IBridge {
         // We set and reset active outbox around external call so activeOutbox remains valid during call
 
         // We use a low level call here since we want to bubble up whether it succeeded or failed to the caller
-        // rather than reverting on failure as well as allow contract and non-contract calls
+        // rather than reverting on failure as well as allowing contract and non-contract calls
         (success, returnData) = _executeLowLevelCall(to, value, data);
 
         _activeOutbox = prevOutbox;

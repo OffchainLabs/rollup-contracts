@@ -79,7 +79,7 @@ abstract contract AbsInbox is DelegateCallAware, PausableUpgradeable, IInboxBase
 
     /// @dev this modifier checks the tx.origin instead of msg.sender for convenience (ie it allows
     /// allowed users to interact with the token bridge without needing the token bridge to be allowList aware).
-    /// this modifier is not intended to use to be used for security (since this opens the allowList to
+    /// this modifier is not intended to be used for security (since this opens the allowList to
     /// a smart contract phishing risk).
     modifier onlyAllowed() {
         // solhint-disable-next-line avoid-tx-origin

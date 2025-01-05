@@ -83,7 +83,7 @@ export async function createRollup(
     // 0.13 ETH is enough to deploy L2 factories via retryables. Excess is refunded
     let feeCost = ethers.utils.parseEther('0.13')
     if (feeToken != ethers.constants.AddressZero) {
-      // in case fees are paid via fee token, then approve rollup cretor to spend required amount
+      // in case fees are paid via fee token, then approve rollup creator to spend required amount
       feeCost = await _getPrescaledAmount(
         ERC20__factory.connect(feeToken, signer),
         feeCost
