@@ -103,7 +103,7 @@ library EdgeChallengeManagerLib {
     ///         proof parsing logic and return the common parts for later use.
     /// @param store                The store containing current edges
     /// @param args                 The edge creation args
-    /// @param ard                  Data about the assertion data is is also need to when creating a Block edge type
+    /// @param ard                  Data about the assertion data is also need to when creating a Block edge type
     ///                             The created edge must be shown to be consistent with the states in the assertion chain
     ///                             Empty for non block edge type edges
     /// @param oneStepProofEntry    The one step proof contract that defines how machine states are hashed
@@ -512,7 +512,7 @@ library EdgeChallengeManagerLib {
                 // in createdAtBlock number
                 return firstRivalCreatedAtBlock - edgeCreatedAtBlock;
             } else {
-                // if this was created at the same time as, or after the the first rival
+                // if this was created at the same time as, or after the first rival
                 // then we return 0
                 return 0;
             }
