@@ -132,6 +132,15 @@ interface ISequencerInbox is IDelayedMessageProvider {
     ///         This enables the batch poster to do key rotation
     function batchPosterManager() external view returns (address);
 
+    /// @notice The fee token pricer is used to get the exchange rate between the child chain's fee token
+    ///         and parent chain's fee token. This is needed when the child chain uses a custom fee
+    ///         token which is different from the parent chain's fee token. The exchange rate is
+    ///         used to correctly report converted gas price in the batch spending reports, so
+    ///         the batch poster can get properly reimbursed on the child chain. If the chain uses
+    ///         a custom fee token, but the pricer is not set, then the batch poster reports won't be reported
+    ///         and the batch poster won't get reimbursed.
+    function feeTokenPricer() external view returns (IFeeTokenPricer);
+
     struct DasKeySetInfo {
         bool isValidKeyset;
         uint64 creationBlock;
@@ -321,6 +330,15 @@ interface ISequencerInbox is IDelayedMessageProvider {
         address newBatchPosterManager
     ) external;
 
+    /**
+     * @notice Updates the fee token pricer, the contract which is used to get the exchange rate between child
+     *         chain's fee token and parent chain's fee token in rollups that use a custom fee token.
+     * @param newFeeTokenPricer The new fee token pricer to be set
+     */
+    function setFeeTokenPricer(
+        IFeeTokenPricer newFeeTokenPricer
+    ) external;
+
     /// @notice Allows the rollup owner to sync the rollup address
     function updateRollupAddress() external;
 
@@ -329,6 +347,17 @@ interface ISequencerInbox is IDelayedMessageProvider {
     function initialize(
         IBridge bridge_,
         MaxTimeVariation calldata maxTimeVariation_,
-        BufferConfig calldata bufferConfig_
+        BufferConfig calldata bufferConfig_,
+        IFeeTokenPricer feeTokenPricer_
     ) external;
+}
+
+interface IFeeTokenPricer {
+    /**
+     * @notice Get the number of child chain fee tokens per 1 parent chain fee token. Exchange rate must be
+     *         denominated in 18 decimals. Function is mutable so it allows the pricer to keep internal state.
+     * @dev    For example, parent chain's native token is ETH, fee token is DAI. If price of 1ETH = 2000DAI, then function should return 2000*1e18.
+     *         If fee token is USDC instead and price of 1ETH = 2000USDC, function should still return 2000*1e18, despite USDC using 6 decimals.
+     */
+    function getExchangeRate() external returns (uint256);
 }

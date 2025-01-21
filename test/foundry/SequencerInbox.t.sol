@@ -41,6 +41,7 @@ contract SequencerInboxTest is Test {
         IBridge.TimeBounds timeBounds,
         IBridge.BatchDataLocation dataLocation
     );
+    event OwnerFunctionCalled(uint256 indexed id);
 
     Random RAND = new Random();
     address rollupOwner = address(137);
@@ -85,7 +86,7 @@ contract SequencerInboxTest is Test {
         SequencerInbox seqInbox = SequencerInbox(
             address(new TransparentUpgradeableProxy(address(seqInboxImpl), proxyAdmin, ""))
         );
-        seqInbox.initialize(bridge, maxTimeVariation, bufferConfig);
+        seqInbox.initialize(bridge, maxTimeVariation, bufferConfig, IFeeTokenPricer(address(0)));
 
         vm.prank(rollupOwner);
         seqInbox.setIsBatchPoster(tx.origin, true);
@@ -119,7 +120,12 @@ contract SequencerInboxTest is Test {
         SequencerInbox seqInbox = SequencerInbox(
             address(new TransparentUpgradeableProxy(address(seqInboxImpl), proxyAdmin, ""))
         );
-        seqInbox.initialize(bridge, maxTimeVariation, bufferConfigDefault);
+        seqInbox.initialize(
+            bridge,
+            maxTimeVariation,
+            bufferConfigDefault,
+            IFeeTokenPricer(makeAddr("feeTokenPricer"))
+        );
 
         vm.prank(rollupOwner);
         seqInbox.setIsBatchPoster(tx.origin, true);
@@ -135,7 +141,8 @@ contract SequencerInboxTest is Test {
         SequencerInbox seqInbox,
         bytes memory data,
         bool hostChainIsArbitrum,
-        bool isUsingFeeToken
+        bool isUsingFeeToken,
+        uint256 exchangeRate
     ) internal {
         uint256 delayedMessagesRead = bridge.delayedMessageCount();
         uint256 sequenceNumber = bridge.sequencerMessageCount();
@@ -161,11 +168,9 @@ contract SequencerInboxTest is Test {
             )
         );
 
-        bytes32 beforeAcc = bytes32(0);
-        bytes32 delayedAcc = bridge.delayedInboxAccs(delayedMessagesRead - 1);
-        bytes32 afterAcc = keccak256(abi.encodePacked(beforeAcc, dataHash, delayedAcc));
-
-        if (!isUsingFeeToken) {
+        // calculate expected spending report message
+        bytes memory expectedSpendingReportMsg = "";
+        {
             uint256 expectedReportedExtraGas = 0;
             if (hostChainIsArbitrum) {
                 // set 0.1 gwei basefee
@@ -181,35 +186,44 @@ contract SequencerInboxTest is Test {
                 expectedReportedExtraGas = l1Fees / basefee;
             }
 
-            bytes memory spendingReportMsg = abi.encodePacked(
+            uint256 expectedReportedGasPrice = block.basefee;
+            if (isUsingFeeToken && address(seqInbox.feeTokenPricer()) != address(0)) {
+                // calculate the scaled gas price for reporting
+                expectedReportedGasPrice = (expectedReportedGasPrice * exchangeRate) / 1e18;
+            }
+            expectedSpendingReportMsg = abi.encodePacked(
                 block.timestamp,
                 msg.sender,
                 dataHash,
                 sequenceNumber,
-                block.basefee,
+                expectedReportedGasPrice,
                 uint64(expectedReportedExtraGas)
             );
-
-            // spending report
-            vm.expectEmit(true, false, false, false);
-            emit MessageDelivered(
-                delayedMessagesRead,
-                delayedAcc,
-                address(seqInbox),
-                L1MessageType_batchPostingReport,
-                tx.origin,
-                keccak256(spendingReportMsg),
-                block.basefee,
-                uint64(block.timestamp)
-            );
-
-            // spending report event in seq inbox
-            vm.expectEmit(true, false, false, false);
-            emit InboxMessageDelivered(delayedMessagesRead, spendingReportMsg);
         }
 
+        bytes32 beforeAcc = bytes32(0);
+        bytes32 delayedAcc = bridge.delayedInboxAccs(delayedMessagesRead - 1);
+        bytes32 afterAcc = keccak256(abi.encodePacked(beforeAcc, dataHash, delayedAcc));
+
+        // spending report
+        vm.expectEmit(true, true, true, true);
+        emit MessageDelivered(
+            delayedMessagesRead,
+            delayedAcc,
+            address(seqInbox),
+            L1MessageType_batchPostingReport,
+            tx.origin,
+            keccak256(expectedSpendingReportMsg),
+            block.basefee,
+            uint64(block.timestamp)
+        );
+
+        // spending report event in seq inbox
+        vm.expectEmit(true, true, true, true);
+        emit InboxMessageDelivered(delayedMessagesRead, expectedSpendingReportMsg);
+
         // sequencer batch delivered
-        vm.expectEmit(true, false, false, false);
+        vm.expectEmit(true, true, true, true);
         emit SequencerBatchDelivered(
             sequenceNumber,
             beforeAcc,
@@ -243,7 +257,7 @@ contract SequencerInboxTest is Test {
         // set 60 gwei basefee
         uint256 basefee = 60000000000;
         vm.fee(basefee);
-        expectEvents(bridge, seqInbox, data, false, false);
+        expectEvents(bridge, seqInbox, data, false, false, 0);
 
         vm.prank(tx.origin);
         seqInbox.addSequencerL2BatchFromOrigin(
@@ -288,11 +302,14 @@ contract SequencerInboxTest is Test {
         address seqInboxLogic =
             address(new SequencerInbox(MAX_DATA_SIZE, dummyReader4844, false, false));
         SequencerInbox seqInboxProxy = SequencerInbox(TestUtil.deployProxy(seqInboxLogic));
-        seqInboxProxy.initialize(IBridge(_bridge), maxTimeVariation, bufferConfig);
+        seqInboxProxy.initialize(
+            IBridge(_bridge), maxTimeVariation, bufferConfig, IFeeTokenPricer(address(0))
+        );
 
         assertEq(seqInboxProxy.isUsingFeeToken(), false, "Invalid isUsingFeeToken");
         assertEq(address(seqInboxProxy.bridge()), address(_bridge), "Invalid bridge");
         assertEq(address(seqInboxProxy.rollup()), address(_bridge.rollup()), "Invalid rollup");
+        assertEq(address(seqInboxProxy.feeTokenPricer()), address(0), "Invalid feeTokenPricer");
     }
 
     function testInitialize_FeeTokenBased(
@@ -307,11 +324,17 @@ contract SequencerInboxTest is Test {
         address seqInboxLogic =
             address(new SequencerInbox(MAX_DATA_SIZE, dummyReader4844, true, false));
         SequencerInbox seqInboxProxy = SequencerInbox(TestUtil.deployProxy(seqInboxLogic));
-        seqInboxProxy.initialize(IBridge(_bridge), maxTimeVariation, bufferConfig);
+        IFeeTokenPricer feeTokenPricer = IFeeTokenPricer(makeAddr("feeTokenPricer"));
+        seqInboxProxy.initialize(IBridge(_bridge), maxTimeVariation, bufferConfig, feeTokenPricer);
 
         assertEq(seqInboxProxy.isUsingFeeToken(), true, "Invalid isUsingFeeToken");
         assertEq(address(seqInboxProxy.bridge()), address(_bridge), "Invalid bridge");
         assertEq(address(seqInboxProxy.rollup()), address(_bridge.rollup()), "Invalid rollup");
+        assertEq(
+            address(seqInboxProxy.feeTokenPricer()),
+            address(feeTokenPricer),
+            "Invalid feeTokenPricer"
+        );
     }
 
     function testInitialize_revert_NativeTokenMismatch_EthFeeToken(
@@ -326,7 +349,9 @@ contract SequencerInboxTest is Test {
         SequencerInbox seqInboxProxy = SequencerInbox(TestUtil.deployProxy(seqInboxLogic));
 
         vm.expectRevert(abi.encodeWithSelector(NativeTokenMismatch.selector));
-        seqInboxProxy.initialize(IBridge(_bridge), maxTimeVariation, bufferConfig);
+        seqInboxProxy.initialize(
+            IBridge(_bridge), maxTimeVariation, bufferConfig, IFeeTokenPricer(address(0))
+        );
     }
 
     function testInitialize_revert_NativeTokenMismatch_FeeTokenEth(
@@ -343,7 +368,22 @@ contract SequencerInboxTest is Test {
         SequencerInbox seqInboxProxy = SequencerInbox(TestUtil.deployProxy(seqInboxLogic));
 
         vm.expectRevert(abi.encodeWithSelector(NativeTokenMismatch.selector));
-        seqInboxProxy.initialize(IBridge(_bridge), maxTimeVariation, bufferConfig);
+        seqInboxProxy.initialize(
+            IBridge(_bridge),
+            maxTimeVariation,
+            bufferConfig,
+            IFeeTokenPricer(makeAddr("feeTokenPricer"))
+        );
+    }
+
+    function testInitialize_revert_CannotSetFeeTokenPricer() public {
+        address bridge = address(new Bridge());
+        address seqInboxLogic =
+            address(new SequencerInbox(MAX_DATA_SIZE, dummyReader4844, false, false));
+        SequencerInbox seqInboxProxy = SequencerInbox(TestUtil.deployProxy(seqInboxLogic));
+        IFeeTokenPricer pricer = IFeeTokenPricer(makeAddr("feeTokenPricer"));
+        vm.expectRevert(abi.encodeWithSelector(CannotSetFeeTokenPricer.selector));
+        seqInboxProxy.initialize(IBridge(bridge), maxTimeVariation, bufferConfigDefault, pricer);
     }
 
     function testAddSequencerL2BatchFromOrigin_ArbitrumHosted(
@@ -369,7 +409,7 @@ contract SequencerInboxTest is Test {
         uint256 sequenceNumber = bridge.sequencerMessageCount();
         uint256 delayedMessagesRead = bridge.delayedMessageCount();
 
-        expectEvents(bridge, seqInbox, data, true, false);
+        expectEvents(bridge, seqInbox, data, true, false, 0);
 
         vm.prank(tx.origin);
         seqInbox.addSequencerL2BatchFromOrigin(
@@ -400,8 +440,14 @@ contract SequencerInboxTest is Test {
         uint256 basefee = 40000000000;
         vm.fee(basefee);
 
-        expectEvents(IBridge(address(bridge)), seqInbox, data, true, true);
+        expectEvents(IBridge(address(bridge)), seqInbox, data, true, true, 1e18);
 
+        address feeTokenPricer = address(seqInbox.feeTokenPricer());
+        vm.mockCall(
+            feeTokenPricer,
+            abi.encodeWithSelector(IFeeTokenPricer.getExchangeRate.selector),
+            abi.encode(uint256(1e18))
+        );
         vm.prank(tx.origin);
         seqInbox.addSequencerL2BatchFromOrigin(
             sequenceNumber,
@@ -511,6 +557,90 @@ contract SequencerInboxTest is Test {
             subMessageCount,
             subMessageCount + 1
         );
+    }
+
+    function testFuzz_addSequencerBatch_FeeToken(
+        uint256 exchangeRate
+    ) public {
+        exchangeRate = bound(exchangeRate, 0, 100000000e18);
+
+        (SequencerInbox seqInbox, ERC20Bridge bridge) = deployFeeTokenBasedRollup();
+        uint8 delayedInboxKind = 3;
+        bytes32 messageDataHash = RAND.Bytes32();
+        bytes memory data = hex"80567890";
+
+        vm.prank(dummyInbox);
+        bridge.enqueueDelayedMessage(delayedInboxKind, address(140), messageDataHash, 0);
+
+        uint256 subMessageCount = bridge.sequencerReportedSubMessageCount();
+        uint256 sequenceNumber = bridge.sequencerMessageCount();
+        uint256 delayedMessagesRead = bridge.delayedMessageCount();
+
+        // set 40 gwei basefee
+        vm.fee(40000000000);
+
+        // make fee token pricer return specified exchange rate
+        vm.mockCall(
+            address(seqInbox.feeTokenPricer()),
+            abi.encodeWithSelector(IFeeTokenPricer.getExchangeRate.selector),
+            abi.encode(exchangeRate)
+        );
+
+        // check if call will overflow due to too high exchange rate
+        bool expectedToOverflow = false;
+        {
+            unchecked {
+                uint256 mul = block.basefee * exchangeRate;
+                if (exchangeRate != 0 && ((mul / exchangeRate) != block.basefee)) {
+                    expectedToOverflow = true;
+                }
+            }
+        }
+
+        if (expectedToOverflow) {
+            vm.expectRevert(stdError.arithmeticError);
+        } else {
+            expectEvents(IBridge(address(bridge)), seqInbox, data, true, true, exchangeRate);
+        }
+        vm.prank(tx.origin);
+        seqInbox.addSequencerL2BatchFromOrigin(
+            sequenceNumber,
+            data,
+            delayedMessagesRead,
+            IGasRefunder(address(0)),
+            subMessageCount,
+            subMessageCount + 1
+        );
+    }
+
+    function testSetFeeTokenPricer() public {
+        (SequencerInbox seqInbox,) = deployFeeTokenBasedRollup();
+        IFeeTokenPricer newPricer = IFeeTokenPricer(makeAddr("newPricer"));
+
+        vm.expectEmit(true, true, true, true);
+        emit OwnerFunctionCalled(6);
+
+        vm.prank(rollupOwner);
+        seqInbox.setFeeTokenPricer(newPricer);
+
+        assertEq(address(seqInbox.feeTokenPricer()), address(newPricer));
+    }
+
+    function testSetFeeTokenPricer_revert_NotRollupOwner() public {
+        (SequencerInbox seqInbox,,) = deployRollup(false, false, bufferConfigDefault);
+        IFeeTokenPricer newPricer = IFeeTokenPricer(makeAddr("newPricer"));
+
+        vm.expectRevert(abi.encodeWithSelector(NotOwner.selector, address(this), rollupOwner));
+        seqInbox.setFeeTokenPricer(newPricer);
+    }
+
+    function testSetFeeTokenPricer_revert_CannotSetFeeTokenPricer() public {
+        (SequencerInbox seqInbox,,) = deployRollup(false, false, bufferConfigDefault);
+        IFeeTokenPricer newPricer = IFeeTokenPricer(makeAddr("newPricer"));
+
+        vm.expectRevert(abi.encodeWithSelector(CannotSetFeeTokenPricer.selector));
+        vm.prank(rollupOwner);
+        seqInbox.setFeeTokenPricer(newPricer);
     }
 
     function testPostUpgradeInitAlreadyInitBuffer(

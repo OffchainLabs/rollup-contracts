@@ -202,7 +202,8 @@ contract RollupTest is Test {
             deployFactoriesToL2: false,
             maxFeePerGasForRetryables: 0,
             batchPosters: new address[](0),
-            batchPosterManager: address(0)
+            batchPosterManager: address(0),
+            feeTokenPricer: IFeeTokenPricer(address(0))
         });
 
         address rollupAddr = rollupCreator.createRollup(param);

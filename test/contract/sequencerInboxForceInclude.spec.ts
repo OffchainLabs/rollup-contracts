@@ -38,7 +38,7 @@ import {
   BridgeInterface,
   MessageDeliveredEvent,
 } from '../../build/types/src/bridge/Bridge'
-import { Signer } from 'ethers'
+import { constants, Signer } from 'ethers'
 import { Toolkit4844 } from './toolkit4844'
 import { data } from './batchData.json'
 
@@ -288,7 +288,8 @@ describe('SequencerInboxForceInclude', async () => {
         threshold: 0,
         max: 0,
         replenishRateInBasis: 0,
-      }
+      },
+      constants.AddressZero
     )
 
     await (
