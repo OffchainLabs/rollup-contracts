@@ -84,19 +84,18 @@ async function perform(
   config: Config,
   deployedContracts: DeployedContracts
 ) {
-  const executor = executors[process.env.CONFIG_NETWORK_NAME!]
-  if (!executor) {
-    throw new Error(
-      'no executor found for CONFIG_NETWORK_NAME or CONFIG_NETWORK_NAME not set'
-    )
-  }
-
   const l1PrivKey = process.env.L1_PRIV_KEY
   if (!l1PrivKey) {
     throw new Error('L1_PRIV_KEY env variable not set')
   }
   let timelockSigner = new Wallet(l1PrivKey, l1Rpc) as unknown as JsonRpcSigner
   if (process.env.ANVILFORK === 'true') {
+    const executor = executors[process.env.CONFIG_NETWORK_NAME!]
+    if (!executor) {
+      throw new Error(
+        'no executor found for CONFIG_NETWORK_NAME or CONFIG_NETWORK_NAME not set'
+      )
+    }
     timelockSigner = await l1Rpc.getSigner(executor)
     await l1Rpc.send('hardhat_impersonateAccount', [executor])
     await l1Rpc.send('hardhat_setBalance', [executor, '0x1000000000000000'])
@@ -123,9 +122,14 @@ async function perform(
     boldActionPerformData,
   ])
 
-  console.log('eoa with executor role:', executor)
+  const signerCanExecute = await upExec.hasRole('0xd8aa0f3194971a2a116679f7c2090f6939c8d4e01a2a8d7e41d55e5351469e63', await timelockSigner.getAddress())
+
   console.log('upgrade executor:', config.contracts.upgradeExecutor)
   console.log('execute(...) call to upgrade executor:', performCallData)
+
+  if (!signerCanExecute) {
+    process.exit(0)
+  }
 
   console.log('executing the upgrade...')
   const receipt = (await (

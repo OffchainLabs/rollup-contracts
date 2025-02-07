@@ -17,6 +17,9 @@ import {
   StateHashPreImageLookup__factory,
   IReader4844__factory,
   IOldRollup__factory,
+  ERC20Bridge__factory,
+  ERC20Outbox__factory,
+  ERC20Inbox__factory,
 } from '../build/types'
 import { bytecode as Reader4844Bytecode } from '../out/yul/Reader4844.yul/Reader4844.json'
 import { DeployedContracts, Config } from './boldUpgradeCommon'
@@ -28,10 +31,13 @@ export const deployDependencies = async (
   maxDataSize: number,
   isUsingFeeToken: boolean,
   isDelayBufferable: boolean,
+  isUsing4844Reader: boolean,
   log: boolean = false,
   verify: boolean = true
 ): Promise<Omit<DeployedContracts, 'boldAction' | 'preImageHashLookup'>> => {
-  const bridgeFac = new Bridge__factory(signer)
+  const bridgeFac = isUsingFeeToken
+    ? new ERC20Bridge__factory(signer)
+    : new Bridge__factory(signer)
   const bridge = await bridgeFac.deploy()
   await bridge.deployed()
   if (log) {
@@ -40,10 +46,10 @@ export const deployDependencies = async (
   if (verify) {
     await bridge.deployTransaction.wait(5)
     await verifyContract(
-      'Bridge',
+      isUsingFeeToken ? 'ERC20Bridge' : 'Bridge',
       bridge.address,
       [],
-      'src/bridge/Bridge.sol:Bridge'
+      isUsingFeeToken ? 'src/bridge/ERC20Bridge.sol:ERC20Bridge' : 'src/bridge/Bridge.sol:Bridge'
     )
   }
 
@@ -52,14 +58,18 @@ export const deployDependencies = async (
     Reader4844Bytecode,
     signer
   )
-  const reader4844 = await contractFactory.deploy()
-  await reader4844.deployed()
-  console.log(`Reader4844 deployed at ${reader4844.address}`)
 
+  let reader4844Addr = ethers.constants.AddressZero;
+  if (isUsing4844Reader) {
+    const reader4844 = await contractFactory.deploy()
+    await reader4844.deployed()
+    reader4844Addr = reader4844.address
+    console.log(`Reader4844 deployed at ${reader4844Addr}`)
+  }
   const seqInboxFac = new SequencerInbox__factory(signer)
   const seqInbox = await seqInboxFac.deploy(
     maxDataSize,
-    reader4844.address,
+    reader4844Addr,
     isUsingFeeToken,
     isDelayBufferable
   )
@@ -73,7 +83,7 @@ export const deployDependencies = async (
     await seqInbox.deployTransaction.wait(5)
     await verifyContract('SequencerInbox', seqInbox.address, [
       maxDataSize,
-      reader4844.address,
+      reader4844Addr,
       isUsingFeeToken,
       isDelayBufferable,
     ])
@@ -90,7 +100,9 @@ export const deployDependencies = async (
     await verifyContract('RollupEventInbox', rei.address, [])
   }
 
-  const outboxFac = new Outbox__factory(signer)
+  const outboxFac = isUsingFeeToken 
+    ? new ERC20Outbox__factory(signer)
+    : new Outbox__factory(signer)
   const outbox = await outboxFac.deploy()
   await outbox.deployed()
   if (log) {
@@ -98,10 +110,12 @@ export const deployDependencies = async (
   }
   if (verify) {
     await outbox.deployTransaction.wait(5)
-    await verifyContract('Outbox', outbox.address, [])
+    await verifyContract(isUsingFeeToken ? 'ERC20Outbox' : 'Outbox', outbox.address, [])
   }
 
-  const inboxFac = new Inbox__factory(signer)
+  const inboxFac = isUsingFeeToken
+    ? new ERC20Inbox__factory(signer)
+    : new Inbox__factory(signer)
   const inbox = await inboxFac.deploy(maxDataSize)
   await inbox.deployed()
   if (log) {
@@ -238,11 +252,13 @@ export const deployBoldUpgrade = async (
     wallet
   )
   const isUsingFeeToken = await sequencerInbox.isUsingFeeToken()
+  const has4844Reader = await sequencerInbox.reader4844() != ethers.constants.AddressZero
   const deployed = await deployDependencies(
     wallet,
     config.settings.maxDataSize,
     isUsingFeeToken,
     config.settings.isDelayBufferable,
+    has4844Reader,
     log,
     verify
   )
