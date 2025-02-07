@@ -22,6 +22,7 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
+          cache: false
 
       - name: Setup node/yarn
         uses: actions/setup-node@v3
@@ -51,6 +52,7 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
+          cache: false
 
       - name: Setup nodejs
         uses: actions/setup-node@v2
@@ -63,6 +65,7 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
+          cache: false
 
       - name: Check Contracts Format
         run: forge fmt --check
@@ -129,6 +132,7 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
+          cache: false
 
       - uses: OffchainLabs/actions/run-nitro-test-node@main
         with:
@@ -258,6 +262,7 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
+          cache: false
 
       - name: Setup node/yarn
         uses: actions/setup-node@v3
