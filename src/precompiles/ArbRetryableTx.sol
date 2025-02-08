@@ -47,6 +47,40 @@ interface ArbRetryableTx {
     ) external returns (uint256);
 
     /**
+     * @notice Brings back to life ticketId.
+     * Donate gas to pay for the lifetime extension.
+     * If successful, emits LifetimeExtended event.
+     * Revert if proof is wrong or ticketId was already revived.
+     * @param ticketId unique ticket identifier
+     * @param numTries number of pre-expiry retries
+     * @param from address of the retryable submitter
+     * @param to retryable's recipient
+     * @param callvalue retryable's callvalue
+     * @param beneficiary retryable's benficiary
+     * @param rootHash the merkle root to prove against
+     * @param leafIndex merkle leaf index that is proved
+     * @param proof merkle proof of the retryable's inclusion in expired accumulator
+     * @return new timeout of ticketId
+     */
+    function revive(
+        bytes32 ticketId,
+        uint64 numTries,
+        address from,
+        address to,
+        uint256 callvalue,
+        address beneficiary,
+        bytes calldata retryData,
+        bytes32 rootHash,
+        uint64 leafIndex,
+        bytes32[] calldata proof
+    ) external returns (uint256);
+
+    /**
+     * @notice Return root hash and tree size from last expired root snapshot
+     */
+    function getLastExpiredRootSnapshot() external view returns (bytes32, uint64);
+
+    /**
      * @notice Return the beneficiary of ticketId.
      * Revert if ticketId doesn't exist.
      * @param ticketId unique ticket identifier
@@ -106,6 +140,30 @@ interface ArbRetryableTx {
     /// @dev DEPRECATED in favour of new RedeemScheduled event after the nitro upgrade
     event Redeemed(bytes32 indexed userTxHash);
 
+    /**
+     * @notice logs a merkle branch for expired proof synthesis
+     * @param hash the merkle hash
+     * @param position = (level << 192) + leaf
+     */
+    event ExpiredMerkleUpdate(bytes32 indexed hash, uint256 indexed position);
+
+    /**
+     * @notice logs a merkle leaf for expired proof synthesis
+     * @param ticketId unique ticket identifier
+     * @param hash the merkle hash
+     * @param position = (level << 192) + leaf
+     * @param numTries number of pre-expiry retries
+     */
+    event RetryableExpired(
+        bytes32 indexed hash,
+        uint256 indexed position,
+        bytes32 indexed ticketId,
+        uint64 numTries
+    );
+
     error NoTicketWithID();
     error NotCallable();
+    error AlreadyRevived();
+    error InvalidRootHash();
+    error WrongProof();
 }
