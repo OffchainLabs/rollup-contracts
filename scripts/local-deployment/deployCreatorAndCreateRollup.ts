@@ -41,6 +41,10 @@ async function main() {
   if (!feeToken) {
     feeToken = ethers.constants.AddressZero
   }
+  let feeTokenPricer = process.env.FEE_TOKEN_PRICER_ADDRESS as string
+  if (!feeTokenPricer) {
+    feeTokenPricer = ethers.constants.AddressZero
+  }
 
   /// get stake token address, if undefined deploy WETH and set it as stake token
   let stakeToken = process.env.STAKE_TOKEN_ADDRESS as string
@@ -84,6 +88,7 @@ async function main() {
     true,
     contracts.rollupCreator.address,
     feeToken,
+    feeTokenPricer,
     stakeToken
   )
 

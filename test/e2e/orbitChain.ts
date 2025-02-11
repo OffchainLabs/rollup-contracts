@@ -20,6 +20,7 @@ import {
   IInbox__factory,
   Inbox__factory,
   RollupCore__factory,
+  RollupCreator,
   RollupCreator__factory,
 } from '../../build/types'
 import { AssertionStateStruct } from '../../build/types/src/challengeV2/IAssertionChain'
@@ -30,6 +31,7 @@ import {
   l1Networks,
   l2Networks,
 } from '@arbitrum/sdk/dist/lib/dataEntities/networks'
+import { ConfigStruct } from '../../build/types/src/rollup/RollupCreator'
 
 const LOCALHOST_L2_RPC = 'http://127.0.0.1:8547'
 const LOCALHOST_L3_RPC = 'http://127.0.0.1:3347'
@@ -822,15 +824,15 @@ describe('Orbit Chain', () => {
     }
 
     /// deploy params
-    const config = {
+    const ownerAddr = '0x72f7EEedF02C522242a4D3Bdc8aE6A8583aD7c5e'
+    const config: ConfigStruct = {
       confirmPeriodBlocks: ethers.BigNumber.from('150'),
-      extraChallengeTimeBlocks: ethers.BigNumber.from('200'),
       stakeToken: ethers.constants.AddressZero,
       baseStake: ethers.utils.parseEther('1'),
       wasmModuleRoot:
         '0xda4e3ad5e7feacb817c21c8d0220da7650fe9051ece68a3f0b1c5d38bbb27b21',
-      owner: '0x72f7EEedF02C522242a4D3Bdc8aE6A8583aD7c5e',
-      loserStakeEscrow: ethers.constants.AddressZero,
+      owner: ownerAddr,
+      loserStakeEscrow: ownerAddr,
       chainId: ethers.BigNumber.from('433333'),
       chainConfig:
         '{"chainId":433333,"homesteadBlock":0,"daoForkBlock":null,"daoForkSupport":true,"eip150Block":0,"eip150Hash":"0x0000000000000000000000000000000000000000000000000000000000000000","eip155Block":0,"eip158Block":0,"byzantiumBlock":0,"constantinopleBlock":0,"petersburgBlock":0,"istanbulBlock":0,"muirGlacierBlock":0,"berlinBlock":0,"londonBlock":0,"clique":{"period":0,"epoch":0},"arbitrum":{"EnableArbOS":true,"AllowDebugPrecompiles":false,"DataAvailabilityCommittee":false,"InitialArbOSVersion":10,"InitialChainOwner":"0x72f7EEedF02C522242a4D3Bdc8aE6A8583aD7c5e","GenesisBlockNum":0}}',
@@ -867,7 +869,7 @@ describe('Orbit Chain', () => {
     const deployFactoriesToL2 = true
     const maxFeePerGasForRetryables = BigNumber.from('100000000') // 0.1 gwei
 
-    const deployParams = {
+    const deployParams: RollupCreator.RollupDeploymentParamsStruct = {
       config,
       batchPosters,
       batchPosterManager,
@@ -876,6 +878,7 @@ describe('Orbit Chain', () => {
       nativeToken: nativeTokenAddress,
       deployFactoriesToL2,
       maxFeePerGasForRetryables,
+      feeTokenPricer: ethers.constants.AddressZero,
     }
 
     /// deploy it
@@ -884,6 +887,7 @@ describe('Orbit Chain', () => {
         value: nativeToken ? BigNumber.from(0) : fee,
       })
     ).wait()
+
     const l1TxReceipt = new L1TransactionReceipt(receipt)
 
     // 1 init message + 8 msgs for deploying factories

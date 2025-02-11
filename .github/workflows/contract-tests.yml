@@ -278,3 +278,76 @@ jobs:
 
       - name: Test upgrade
         run: L1_RPC=${{ secrets.L1_RPC || 'https://rpc.ankr.com/eth' }} yarn test:upgrade
+
+  test-e2e-custom-fee-token:
+    name: Test e2e custom fee token
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - uses: OffchainLabs/actions/run-nitro-test-node@main
+        with:
+          args: --pos  --l3-fee-token --l3-fee-token-pricer
+          l3-node: true
+          no-token-bridge: true
+          no-l3-token-bridge: true
+          nitro-testnode-ref: fee-token-pricer
+          # nitro-contracts-branch: 'custom-fee-rollup'
+          nitro-contracts-branch: '${{ github.event.pull_request.head.sha || github.sha }}'
+
+      - name: Setup node/yarn
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+          cache: 'yarn'
+          cache-dependency-path: '**/yarn.lock'
+
+      - name: Install packages
+        run: yarn
+
+      - name: Compile contracts
+        run: yarn build
+
+      - name: Run e2e orbit tests
+        run: yarn test:e2e:orbit
+
+      - name: Run e2e orbit custom fee token rollup tests
+        run: yarn test:e2e:orbit-fee-token-rollup
+  test-e2e-fee-token-6-decimals:
+    name: Test e2e fee token with 6 decimals
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - uses: OffchainLabs/actions/run-nitro-test-node@main
+        with:
+          l3-node: true
+          args: --pos --l3-fee-token --l3-fee-token-pricer --l3-fee-token-decimals 6
+          no-token-bridge: true
+          no-l3-token-bridge: true
+          nitro-testnode-ref: fee-token-pricer
+          # nitro-contracts-branch: 'custom-fee-rollup'
+          nitro-contracts-branch: '${{ github.event.pull_request.head.sha || github.sha }}'
+
+      - name: Setup node/yarn
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+          cache: 'yarn'
+          cache-dependency-path: '**/yarn.lock'
+
+      - name: Install packages
+        run: yarn
+
+      - name: Compile contracts
+        run: yarn build
+
+      - name: Run e2e tests
+        run: yarn test:e2e:orbit
+
+      - name: Run e2e orbit custom fee token rollup tests
+        run: yarn test:e2e:orbit-fee-token-rollup

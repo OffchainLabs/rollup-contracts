@@ -24,7 +24,7 @@ import {
   SequencerBatchDeliveredEvent,
   SequencerInboxInterface,
 } from '../../build/types/src/bridge/SequencerInbox'
-import { ContractReceipt, Signer } from 'ethers'
+import { constants, ContractReceipt, Signer } from 'ethers'
 import {
   DelayedMsg,
   DelayedMsgDelivered,
@@ -351,7 +351,8 @@ export const setupSequencerInbox = async (
   await sequencerInbox.initialize(
     bridgeProxy.address,
     maxDelay,
-    delayConfigDefault
+    delayConfigDefault,
+    constants.AddressZero
   )
   await (
     await sequencerInbox

@@ -3,11 +3,21 @@ import '@nomiclabs/hardhat-ethers'
 import { run } from 'hardhat'
 import { abi as rollupCreatorAbi } from '../build/contracts/src/rollup/RollupCreator.sol/RollupCreator.json'
 import { config, maxDataSize } from './config'
-import { BigNumber, Signer } from 'ethers'
-import { ERC20, ERC20__factory, IERC20__factory } from '../build/types'
+import { BigNumber, Event, Signer } from 'ethers'
+import {
+  ERC20,
+  ERC20__factory,
+  IERC20__factory,
+  RollupCreator,
+} from '../build/types'
 import { sleep } from './testSetup'
 import { promises as fs } from 'fs'
 import { _isRunningOnArbitrum, verifyContract } from './deploymentUtils'
+import {
+  AssertionStateStruct,
+  ConfigStruct,
+} from '../build/types/src/rollup/RollupCreator'
+import { constants } from 'buffer'
 
 // 1 gwei
 const MAX_FER_PER_GAS = BigNumber.from('1000000000')
@@ -60,6 +70,7 @@ export async function createRollup(
   isDevDeployment: boolean,
   rollupCreatorAddress: string,
   feeToken: string,
+  feeTokenPricer: string,
   stakeToken: string
 ): Promise<{
   rollupCreationResult: RollupCreationResult
@@ -75,7 +86,7 @@ export async function createRollup(
     rollupCreatorAddress,
     rollupCreatorAbi,
     signer
-  )
+  ) as RollupCreator
   const validatorWalletCreator = await rollupCreator.validatorWalletCreator()
 
   try {
@@ -100,7 +111,12 @@ export async function createRollup(
     // Call the createRollup function
     console.log('Calling createRollup to generate a new rollup ...')
     const deployParams = isDevDeployment
-      ? await _getDevRollupConfig(feeToken, validatorWalletCreator, stakeToken)
+      ? await _getDevRollupConfig(
+          feeToken,
+          feeTokenPricer,
+          validatorWalletCreator,
+          stakeToken
+        )
       : {
           config: config.rollupConfig,
           validators: config.validators,
@@ -110,6 +126,7 @@ export async function createRollup(
           maxFeePerGasForRetryables: MAX_FER_PER_GAS,
           batchPosters: config.batchPosters,
           batchPosterManager: config.batchPosterManager,
+          feeTokenPricer: feeTokenPricer,
         }
 
     const createRollupTx = await rollupCreator.createRollup(deployParams, {
@@ -118,7 +135,7 @@ export async function createRollup(
     const createRollupReceipt = await createRollupTx.wait()
 
     const rollupCreatedEvent = createRollupReceipt.events?.find(
-      (event: RollupCreatedEvent) =>
+      (event: Event): event is Event =>
         event.event === 'RollupCreated' &&
         event.address.toLowerCase() === rollupCreatorAddress.toLowerCase()
     )
@@ -218,9 +235,10 @@ export async function createRollup(
 
 async function _getDevRollupConfig(
   feeToken: string,
+  feeTokenPricer: string,
   validatorWalletCreator: string,
   stakeToken: string
-) {
+): Promise<RollupCreator.RollupDeploymentParamsStruct> {
   // set up owner address
   const ownerAddress =
     process.env.OWNER_ADDRESS !== undefined ? process.env.OWNER_ADDRESS : ''
@@ -292,39 +310,50 @@ async function _getDevRollupConfig(
     }
   }
 
-  return {
-    config: {
-      confirmPeriodBlocks: ethers.BigNumber.from('20'),
-      extraChallengeTimeBlocks: ethers.BigNumber.from('200'),
-      stakeToken: stakeToken,
-      baseStake: ethers.utils.parseEther('1'),
-      wasmModuleRoot: wasmModuleRoot,
-      owner: ownerAddress,
-      loserStakeEscrow: ethers.constants.AddressZero,
-      chainId: JSON.parse(chainConfig)['chainId'],
-      chainConfig: chainConfig,
-      minimumAssertionPeriod: 75,
-      validatorAfkBlocks: 201600,
-      genesisAssertionState: {}, // AssertionState
-      genesisInboxCount: 0,
-      miniStakeValues: [
-        ethers.utils.parseEther('1'),
-        ethers.utils.parseEther('1'),
-        ethers.utils.parseEther('1'),
-      ],
-      layerZeroBlockEdgeHeight: 2 ** 5,
-      layerZeroBigStepEdgeHeight: 2 ** 5,
-      layerZeroSmallStepEdgeHeight: 2 ** 5,
-      numBigStepLevel: 1,
-      challengeGracePeriodBlocks: 10,
-      bufferConfig: { threshold: 600, max: 14400, replenishRateInBasis: 500 },
-      sequencerInboxMaxTimeVariation: {
-        delayBlocks: ethers.BigNumber.from('5760'),
-        futureBlocks: ethers.BigNumber.from('12'),
-        delaySeconds: ethers.BigNumber.from('86400'),
-        futureSeconds: ethers.BigNumber.from('3600'),
-      },
+  const genesisAssertionState: AssertionStateStruct = {
+    globalState: {
+      bytes32Vals: [ethers.constants.HashZero, ethers.constants.HashZero],
+      u64Vals: [ethers.BigNumber.from('0'), ethers.BigNumber.from('0')],
     },
+    machineStatus: 0,
+    endHistoryRoot: ethers.constants.HashZero,
+  }
+
+  const config: ConfigStruct = {
+    confirmPeriodBlocks: ethers.BigNumber.from('20'),
+    stakeToken: stakeToken,
+    baseStake: ethers.utils.parseEther('1'),
+    wasmModuleRoot: wasmModuleRoot,
+    owner: ownerAddress,
+    loserStakeEscrow: ownerAddress,
+    chainId: JSON.parse(chainConfig)['chainId'],
+    chainConfig: chainConfig,
+    minimumAssertionPeriod: 75,
+    validatorAfkBlocks: 201600,
+    genesisAssertionState: genesisAssertionState, // AssertionState
+    genesisInboxCount: 0,
+    miniStakeValues: [
+      ethers.utils.parseEther('1'),
+      ethers.utils.parseEther('1'),
+      ethers.utils.parseEther('1'),
+    ],
+    layerZeroBlockEdgeHeight: 2 ** 5,
+    layerZeroBigStepEdgeHeight: 2 ** 5,
+    layerZeroSmallStepEdgeHeight: 2 ** 5,
+    numBigStepLevel: 1,
+    challengeGracePeriodBlocks: 10,
+    bufferConfig: { threshold: 600, max: 14400, replenishRateInBasis: 500 },
+    sequencerInboxMaxTimeVariation: {
+      delayBlocks: ethers.BigNumber.from('5760'),
+      futureBlocks: ethers.BigNumber.from('12'),
+      delaySeconds: ethers.BigNumber.from('86400'),
+      futureSeconds: ethers.BigNumber.from('3600'),
+    },
+    anyTrustFastConfirmer: ethers.constants.AddressZero,
+  }
+
+  return {
+    config: config,
     validators: validators,
     maxDataSize: _maxDataSize,
     nativeToken: feeToken,
@@ -332,6 +361,7 @@ async function _getDevRollupConfig(
     maxFeePerGasForRetryables: MAX_FER_PER_GAS,
     batchPosters: batchPosters,
     batchPosterManager: batchPosterManager,
+    feeTokenPricer: feeTokenPricer,
   }
 
   function _createValidatorAddress(
