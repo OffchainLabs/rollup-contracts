@@ -23,6 +23,8 @@ import { expect } from 'chai'
 import {
   Bridge,
   Bridge__factory,
+  GasRefunder__factory,
+  GasRefunderOpt__factory,
   Inbox,
   Inbox__factory,
   MessageTester,
@@ -247,6 +249,13 @@ describe('SequencerInboxForceInclude', async () => {
     const bridgeFac = (await ethers.getContractFactory(
       'Bridge'
     )) as Bridge__factory
+    const gasRefunderFac = (await ethers.getContractFactory(
+      'GasRefunder'
+    )) as GasRefunder__factory
+    const GasRefunderOptFac = (await ethers.getContractFactory(
+      'GasRefunderOpt'
+    )) as GasRefunderOpt__factory
+
     const bridgeTemplate = await bridgeFac.deploy()
     const transparentUpgradeableProxyFac = (await ethers.getContractFactory(
       'TransparentUpgradeableProxy'
@@ -267,6 +276,7 @@ describe('SequencerInboxForceInclude', async () => {
       adminAddr,
       '0x'
     )
+
     const bridge = await bridgeFac.attach(bridgeProxy.address).connect(user)
     const bridgeAdmin = await bridgeFac
       .attach(bridgeProxy.address)
@@ -304,6 +314,35 @@ describe('SequencerInboxForceInclude', async () => {
     await bridgeAdmin.setDelayedInbox(inbox.address, true)
     await bridgeAdmin.setSequencerInbox(sequencerInbox.address)
 
+    const gasRefunder = await gasRefunderFac.deploy()
+    await gasRefunder.deployed()
+    await (await gasRefunder.allowContracts([sequencerInbox.address])).wait()
+    await (
+      await gasRefunder.allowRefundees([await batchPoster.getAddress()])
+    ).wait()
+    await (await gasRefunder.setExtraGasMargin(35000)).wait()
+
+    const GasRefunderOpt = await GasRefunderOptFac.deploy(
+      sequencerInbox.address,
+      0, // no limit
+      35000, // extra gas margin
+      16, // gas per calldata byte
+      2e9, // maxGasTip 2 gwei
+      120e9, // maxGasCost 120 gwei
+      2e6 // maxSingleGasUsage 2 million gas
+    )
+    await GasRefunderOpt.deployed()
+
+    await accounts[0].sendTransaction({
+      value: ethers.utils.parseEther('10000.0'),
+      to: gasRefunder.address,
+    })
+
+    await accounts[0].sendTransaction({
+      value: ethers.utils.parseEther('10000.0'),
+      to: GasRefunderOpt.address,
+    })
+
     await (
       await sequencerInbox
         .connect(rollupOwner)
@@ -326,6 +365,8 @@ describe('SequencerInboxForceInclude', async () => {
       bridgeProxy,
       rollup,
       rollupOwner,
+      GasRefunderOpt,
+      gasRefunder,
     }
   }
 
@@ -364,6 +405,98 @@ describe('SequencerInboxForceInclude', async () => {
           { gasLimit: 10000000 }
         )
     ).wait()
+  })
+
+  it('can add batch and refund gas', async () => {
+    const {
+      user,
+      inbox,
+      bridge,
+      messageTester,
+      sequencerInbox,
+      batchPoster,
+      gasRefunder,
+    } = await setupSequencerInbox()
+
+    await sendDelayedTx(
+      user,
+      inbox,
+      bridge,
+      messageTester,
+      1000000,
+      21000000000,
+      0,
+      await user.getAddress(),
+      BigNumber.from(10),
+      '0x1010'
+    )
+    const messagesRead = await bridge.delayedMessageCount()
+    const seqReportedMessageSubCount =
+      await bridge.sequencerReportedSubMessageCount()
+    const balBefore = await batchPoster.getBalance()
+    const txn = await (
+      await sequencerInbox
+        .connect(batchPoster)
+        .functions[
+          'addSequencerL2BatchFromOrigin(uint256,bytes,uint256,address,uint256,uint256)'
+        ](
+          0,
+          data,
+          messagesRead,
+          gasRefunder.address,
+          seqReportedMessageSubCount,
+          seqReportedMessageSubCount.add(10),
+          { gasLimit: 10000000 }
+        )
+    ).wait()
+    // console.log('Mutable Gas Refunder', txn.gasUsed.toNumber())
+    expect((await batchPoster.getBalance()).gt(balBefore), 'Refund not enough')
+  })
+
+  it('can add batch and refund gas', async () => {
+    const {
+      user,
+      inbox,
+      bridge,
+      messageTester,
+      sequencerInbox,
+      batchPoster,
+      GasRefunderOpt,
+    } = await setupSequencerInbox()
+
+    await sendDelayedTx(
+      user,
+      inbox,
+      bridge,
+      messageTester,
+      1000000,
+      21000000000,
+      0,
+      await user.getAddress(),
+      BigNumber.from(10),
+      '0x1010'
+    )
+    const messagesRead = await bridge.delayedMessageCount()
+    const seqReportedMessageSubCount =
+      await bridge.sequencerReportedSubMessageCount()
+    const balBefore = await batchPoster.getBalance()
+    const txn = await (
+      await sequencerInbox
+        .connect(batchPoster)
+        .functions[
+          'addSequencerL2BatchFromOrigin(uint256,bytes,uint256,address,uint256,uint256)'
+        ](
+          0,
+          data,
+          messagesRead,
+          GasRefunderOpt.address,
+          seqReportedMessageSubCount,
+          seqReportedMessageSubCount.add(10),
+          { gasLimit: 10000000 }
+        )
+    ).wait()
+    // console.log('Sequencer Gas Refunder', txn.gasUsed.toNumber())
+    expect((await batchPoster.getBalance()).gt(balBefore), 'Refund not enough')
   })
 
   it('can force-include', async () => {
